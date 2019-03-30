@@ -50,7 +50,7 @@ class DistanceMatrix:
 
     def MST(self, nodes):
         tree=[]
-        freeset=nodes
+        freeset=nodes[:]
         size=0
         edges=[]
 
@@ -65,12 +65,12 @@ class DistanceMatrix:
 
         return size, edges
 
-    def meanDistInGroup(self, nodes, groupID):
+    def meanDistInSingleGroup(self, nodes, groupID):
         if groupID not in self.scorePerCluster.keys():
             nodes_distances = dict(zip(nodes, [0]*len(nodes)))
             for i1, i2 in product(nodes,nodes):
                 if i1 != i2:
-                    nodes_distances[i1] += self.getDist(i1, i2)
+                    nodes_distances[i1] += self.getDist(i1, i2)[0]
             self.scorePerCluster[groupID] = nodes_distances
             return sum(nodes_distances.values())
 
@@ -88,11 +88,13 @@ class DistanceMatrix:
             for e in excessive_points:
                 del self.scorePerCluster[groupID][e]
             
+            return sum(self.scorePerCluster[groupID].values())
 
-            
-        
-
-
+    def meanDistForAllGroups(self):
+        score = 0
+        for c in self.scorePerCluster.values():
+            score += sum(c.values())
+        return score
 
     def show(self, data, trees):
         for tree, i in zip(trees,range(len(trees))):
@@ -111,6 +113,7 @@ class DistanceMatrix:
         counter=0
         while freeset!=[]:
             _, (_,neighbor) = self.findNearestNode(clusters[counter%n], freeset)
+            neighbor = int(neighbor)
             alt = []
             for cluster in clusters:
                 t = [self.getDist(neighbor, node)[0] for node in cluster]
@@ -243,6 +246,22 @@ if False:
     dm.show(df, trees)
 else:
     clusters = dm.greed(10)
+
     outcome = [dm.MST(cluster) for cluster in clusters]
     score = sum([o[0] for o in outcome])
     print(score)
+
+    print(dm.scorePerCluster.keys())
+
+    start = time.time()    
+    for i, c in enumerate(clusters):
+        print(dm.meanDistInSingleGroup(c, i))
+    end = time.time()
+    print('     first run ', end-start)
+    start = time.time()    
+    for i, c in enumerate(clusters):
+        print(dm.meanDistInSingleGroup(c, i))
+    end = time.time()
+    print('     second run ', end-start)
+
+    print('general score', dm)
