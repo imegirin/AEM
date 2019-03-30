@@ -1,9 +1,10 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+from itertools import product
 import random
 import pickle
-import timeit
+import time
 import math
 import os
 
@@ -15,6 +16,7 @@ class DistanceMatrix:
     def __init__(self, df, filename):
         self.filename=filename
         self.matrix = self.distanceArray(df)
+        self.scorePerCluster = {}
 
     def distance(self, a, b):
         return math.sqrt(math.pow(a[0]-b[0], 2) + math.pow(a[1]-b[1], 2))
@@ -62,6 +64,35 @@ class DistanceMatrix:
             size+=dist
 
         return size, edges
+
+    def meanDistInGroup(self, nodes, groupID):
+        if groupID not in self.scorePerCluster.keys():
+            nodes_distances = dict(zip(nodes, [0]*len(nodes)))
+            for i1, i2 in product(nodes,nodes):
+                if i1 != i2:
+                    nodes_distances[i1] += self.getDist(i1, i2)
+            self.scorePerCluster[groupID] = nodes_distances
+            return sum(nodes_distances.values())
+
+        elif set(nodes)==self.scorePerCluster[groupID].keys():
+            return sum(self.scorePerCluster[groupID].values())
+
+        elif self.scorePerCluster[groupID].keys() != set(nodes):    
+            missing_points = set(nodes) - set(self.scorePerCluster[groupID].keys())
+            excessive_points = set(self.scorePerCluster[groupID].keys()) - set(nodes)
+
+            for m in missing_points:
+                self.scorePerCluster[groupID][m] = \
+                    sum([self.getDist(m, i) for i in self.scorePerCluster[groupID].keys()])
+            
+            for e in excessive_points:
+                del self.scorePerCluster[groupID][e]
+            
+
+            
+        
+
+
 
     def show(self, data, trees):
         for tree, i in zip(trees,range(len(trees))):
@@ -128,7 +159,6 @@ class DistanceMatrix:
 
         return clusters
 
-
     def greed2(self, n):
         freeset=[i for i in range(len(self.matrix))]
         random.shuffle(freeset)
@@ -187,28 +217,32 @@ class DistanceMatrix:
 
         return clusters
 
-
-
 dm=DistanceMatrix(df, 'matrix.p')
 
-time=[]
-scores=[]
-trees=[]
-last_best_score=999999
-for _ in range(100):
-    start = timeit.timeit()
-    clusters = dm.greed2(10)
-    end = timeit.timeit()
-    time.append(end-start)
+if False:
+    times=[]
+    scores=[]
+    trees=[]
+    last_best_score=999999
+    for _ in range(100):
+        start = time.time()
+        clusters = dm.greed(10)
+        end = time.time()
+        times.append(end-start)
 
+        outcome = [dm.MST(cluster) for cluster in clusters]
+        score = sum([o[0] for o in outcome])
+        scores.append(score)
+        if score<last_best_score:
+            last_best_score=score
+            trees = [o[1] for o in outcome]
+
+    print('time avg: {}, min: {}, max: {}'.format(np.mean(times), min(times), max(times)))
+    print('score avg: {}, min: {}, max: {}'.format(np.mean(scores), min(scores), max(scores)))
+
+    dm.show(df, trees)
+else:
+    clusters = dm.greed(10)
     outcome = [dm.MST(cluster) for cluster in clusters]
     score = sum([o[0] for o in outcome])
-    scores.append(score)
-    if score<last_best_score:
-        last_best_score=score
-        trees = [o[1] for o in outcome]
-
-print('time avg: {}, min: {}, max: {}'.format(np.mean(time), min(time), max(time)))
-print('score avg: {}, min: {}, max: {}'.format(np.mean(scores), min(scores), max(scores)))
-
-dm.show(df, trees)
+    print(score)
