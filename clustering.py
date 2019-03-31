@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from itertools import product
+from copy import deepcopy
 import random
 import pickle
 import time
@@ -82,18 +83,25 @@ class DistanceMatrix:
             excessive_points = set(self.scorePerCluster[groupID].keys()) - set(nodes)
 
             for m in missing_points:
-                self.scorePerCluster[groupID][m] = \
-                    sum([self.getDist(m, i) for i in self.scorePerCluster[groupID].keys()])
+                self.scorePerCluster[groupID][m]= \
+                    sum([self.getDist(m, i)[0] for i in self.scorePerCluster[groupID] if m!=i])
             
             for e in excessive_points:
                 del self.scorePerCluster[groupID][e]
             
             return sum(self.scorePerCluster[groupID].values())
+    
+    def distInSingleGroup(self, nodes):
+        dist =0 
+        for i1, i2 in product(nodes,nodes):
+                if i1 != i2:
+                    dist+=self.getDist(i1,i2)[0]
+        return dist
 
-    def meanDistForAllGroups(self):
+    def meanDistForAllGroups(self, clusters):
         score = 0
-        for c in self.scorePerCluster.values():
-            score += sum(c.values())
+        for i in range(len(clusters)):
+            score += self.meanDistInSingleGroup(clusters[i], i)
         return score
 
     def show(self, data, trees):
@@ -220,6 +228,77 @@ class DistanceMatrix:
 
         return clusters
 
+    def steep_local_search(self, clusters):
+        point_space = list(range(len(self.matrix)))
+        random.shuffle(point_space)
+
+        this_cluster_id = None
+        this_cluster_new_group = []
+        another_cluster_id = None
+        another_cluster_new_group = []
+        best_diff=0
+        for i in point_space:
+            current_cluster_id = [clusters.index(t) for t in clusters if i in t][0]
+            current_cluster_score = self.meanDistInSingleGroup(clusters[current_cluster_id], current_cluster_id)
+
+            new_group = [e for e in clusters[current_cluster_id] if e!=i]
+            reduced_cluster_score = self.meanDistInSingleGroup(new_group, current_cluster_id)
+            
+            for c in clusters:
+                if c!= clusters[current_cluster_id]:
+                    extended_cluster_id = clusters.index(c)
+                    extended_cluster_score_before = self.meanDistInSingleGroup(c, extended_cluster_id)
+                    extended_cluster_score = self.meanDistInSingleGroup(c+[i], extended_cluster_id)
+                    diff = (reduced_cluster_score + extended_cluster_score) -\
+                        (current_cluster_score + extended_cluster_score_before)
+         
+                    if diff<best_diff:
+                        this_cluster_id = current_cluster_id
+                        this_cluster_new_group = new_group
+
+                        another_cluster_id = extended_cluster_id
+                        another_cluster_new_group = c+[i]
+                        best_diff=diff
+        if another_cluster_id!=None:
+            clusters[this_cluster_id] = this_cluster_new_group
+            clusters[another_cluster_id] = another_cluster_new_group
+            self.meanDistForAllGroups(clusters)
+            return 200
+
+    def greedy_local_search(self, clusters):
+        point_space = list(range(len(self.matrix)))
+        random.shuffle(point_space)
+        for i in point_space:
+            current_cluster_id = [clusters.index(t) for t in clusters if i in t][0]
+            current_cluster_score = self.meanDistInSingleGroup(clusters[current_cluster_id], current_cluster_id)
+
+            new_group = [e for e in clusters[current_cluster_id] if e!=i]
+            reduced_cluster_score = self.meanDistInSingleGroup(new_group, current_cluster_id)
+
+            for c in clusters:
+                if c!= clusters[current_cluster_id]:
+                    extended_cluster_id = clusters.index(c)
+                    extended_cluster_score_before = self.meanDistInSingleGroup(c, extended_cluster_id)
+                    extended_cluster_score = self.meanDistInSingleGroup(c+[i], extended_cluster_id)
+                    diff = (reduced_cluster_score + extended_cluster_score) -\
+                        (current_cluster_score + extended_cluster_score_before)
+         
+                    if diff<0:
+                        clusters[current_cluster_id] = new_group
+                        clusters[extended_cluster_id] = c+[i]
+                        return 200
+                    self.meanDistInSingleGroup(clusters[current_cluster_id], current_cluster_id)
+                    self.meanDistInSingleGroup(c, extended_cluster_id)
+                    self.meanDistForAllGroups(clusters)
+        return None
+
+    def local_search(self, clusters, function):
+        code_response = 200
+        while code_response!=None:
+            code_response = function(clusters)
+        return clusters
+
+
 dm=DistanceMatrix(df, 'matrix.p')
 
 if False:
@@ -246,22 +325,18 @@ if False:
     dm.show(df, trees)
 else:
     clusters = dm.greed(10)
-
-    outcome = [dm.MST(cluster) for cluster in clusters]
-    score = sum([o[0] for o in outcome])
-    print(score)
-
-    print(dm.scorePerCluster.keys())
-
-    start = time.time()    
+    clusters2 = deepcopy(clusters)
+  
     for i, c in enumerate(clusters):
-        print(dm.meanDistInSingleGroup(c, i))
-    end = time.time()
-    print('     first run ', end-start)
-    start = time.time()    
-    for i, c in enumerate(clusters):
-        print(dm.meanDistInSingleGroup(c, i))
-    end = time.time()
-    print('     second run ', end-start)
+        print(len(c), dm.meanDistInSingleGroup(c, i))
+    print("         overall", dm.meanDistForAllGroups(clusters))
 
-    print('general score', dm)
+    clusters2 = dm.local_search(clusters2,dm.greedy_local_search)   
+    for i, c in enumerate(clusters2):
+        print(len(c), dm.meanDistInSingleGroup(c, i))
+    print("         overall", dm.meanDistForAllGroups(clusters2))
+
+    clusters = dm.local_search(clusters,dm.steep_local_search)   
+    for i, c in enumerate(clusters):
+        print(len(c), dm.meanDistInSingleGroup(c, i))
+    print("         overall", dm.meanDistForAllGroups(clusters))
