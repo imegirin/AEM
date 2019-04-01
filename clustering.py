@@ -3,14 +3,15 @@ import numpy as np
 import matplotlib.pyplot as plt
 from itertools import product
 from copy import deepcopy
+import seaborn as sns
 import random
 import pickle
 import time
 import math
 import os
 
-df = pd.read_csv('objects.data', sep=' ', names=['x','y'], index_col=False)
-df.index = [i+1 for i in df.index]
+df = pd.read_csv('objects20_06.data', sep=' ', names=['x','y'], index_col=False)
+#df.index = [i+1 for i in df.index]
 
 class DistanceMatrix:
 
@@ -66,7 +67,7 @@ class DistanceMatrix:
 
         return size, edges
 
-    def meanDistInSingleGroup(self, nodes, groupID):
+    def distancesInSingleGroup(self, nodes, groupID):
         if groupID not in self.scorePerCluster.keys():
             nodes_distances = dict(zip(nodes, [0]*len(nodes)))
             for i1, i2 in product(nodes,nodes):
@@ -101,8 +102,8 @@ class DistanceMatrix:
     def meanDistForAllGroups(self, clusters):
         score = 0
         for i in range(len(clusters)):
-            score += self.meanDistInSingleGroup(clusters[i], i)
-        return score
+            score += self.distancesInSingleGroup(clusters[i], i)
+        return score/len(self.matrix)
 
     def show(self, data, trees):
         for tree, i in zip(trees,range(len(trees))):
@@ -111,6 +112,12 @@ class DistanceMatrix:
                         [data.iloc[point[0]].y, data.iloc[point[1]].y],
                         color=f'C{i}',linewidth=3)
         plt.scatter(data['x'], data['y'])
+        plt.show()
+    
+    def showClusters(self, data, clusters):
+        for i, cluster in enumerate(clusters):
+            plt.scatter(data.loc[cluster].x, data.loc[cluster].y, \
+                c=np.hstack(np.random.rand(3,1)))
         plt.show()
 
     def greed(self, n):
@@ -228,6 +235,16 @@ class DistanceMatrix:
 
         return clusters
 
+    def random(self, n):
+        freeset = [i for i in range(len(self.matrix))]
+        random.shuffle(freeset)
+        clusters = [[] for _ in range(n)]
+        c = 0
+        while freeset!=[]:
+                clusters[c%n].append(freeset.pop())     
+                c+=1
+        return clusters       
+
     def steep_local_search(self, clusters):
         point_space = list(range(len(self.matrix)))
         random.shuffle(point_space)
@@ -237,18 +254,19 @@ class DistanceMatrix:
         another_cluster_id = None
         another_cluster_new_group = []
         best_diff=0
+
         for i in point_space:
             current_cluster_id = [clusters.index(t) for t in clusters if i in t][0]
-            current_cluster_score = self.meanDistInSingleGroup(clusters[current_cluster_id], current_cluster_id)
+            current_cluster_score = self.distancesInSingleGroup(clusters[current_cluster_id], current_cluster_id)
 
             new_group = [e for e in clusters[current_cluster_id] if e!=i]
-            reduced_cluster_score = self.meanDistInSingleGroup(new_group, current_cluster_id)
+            reduced_cluster_score = self.distancesInSingleGroup(new_group, current_cluster_id)
             
             for c in clusters:
                 if c!= clusters[current_cluster_id]:
                     extended_cluster_id = clusters.index(c)
-                    extended_cluster_score_before = self.meanDistInSingleGroup(c, extended_cluster_id)
-                    extended_cluster_score = self.meanDistInSingleGroup(c+[i], extended_cluster_id)
+                    extended_cluster_score_before = self.distancesInSingleGroup(c, extended_cluster_id)
+                    extended_cluster_score = self.distancesInSingleGroup(c+[i], extended_cluster_id)
                     diff = (reduced_cluster_score + extended_cluster_score) -\
                         (current_cluster_score + extended_cluster_score_before)
          
@@ -262,7 +280,6 @@ class DistanceMatrix:
         if another_cluster_id!=None:
             clusters[this_cluster_id] = this_cluster_new_group
             clusters[another_cluster_id] = another_cluster_new_group
-            self.meanDistForAllGroups(clusters)
             return 200
 
     def greedy_local_search(self, clusters):
@@ -270,16 +287,16 @@ class DistanceMatrix:
         random.shuffle(point_space)
         for i in point_space:
             current_cluster_id = [clusters.index(t) for t in clusters if i in t][0]
-            current_cluster_score = self.meanDistInSingleGroup(clusters[current_cluster_id], current_cluster_id)
+            current_cluster_score = self.distancesInSingleGroup(clusters[current_cluster_id], current_cluster_id)
 
             new_group = [e for e in clusters[current_cluster_id] if e!=i]
-            reduced_cluster_score = self.meanDistInSingleGroup(new_group, current_cluster_id)
+            reduced_cluster_score = self.distancesInSingleGroup(new_group, current_cluster_id)
 
             for c in clusters:
                 if c!= clusters[current_cluster_id]:
                     extended_cluster_id = clusters.index(c)
-                    extended_cluster_score_before = self.meanDistInSingleGroup(c, extended_cluster_id)
-                    extended_cluster_score = self.meanDistInSingleGroup(c+[i], extended_cluster_id)
+                    extended_cluster_score_before = self.distancesInSingleGroup(c, extended_cluster_id)
+                    extended_cluster_score = self.distancesInSingleGroup(c+[i], extended_cluster_id)
                     diff = (reduced_cluster_score + extended_cluster_score) -\
                         (current_cluster_score + extended_cluster_score_before)
          
@@ -287,9 +304,9 @@ class DistanceMatrix:
                         clusters[current_cluster_id] = new_group
                         clusters[extended_cluster_id] = c+[i]
                         return 200
-                    self.meanDistInSingleGroup(clusters[current_cluster_id], current_cluster_id)
-                    self.meanDistInSingleGroup(c, extended_cluster_id)
-                    self.meanDistForAllGroups(clusters)
+                    self.distancesInSingleGroup(clusters[current_cluster_id], current_cluster_id)
+                    self.distancesInSingleGroup(c, extended_cluster_id)
+                    #print(self.meanDistForAllGroups(clusters))
         return None
 
     def local_search(self, clusters, function):
@@ -297,7 +314,6 @@ class DistanceMatrix:
         while code_response!=None:
             code_response = function(clusters)
         return clusters
-
 
 dm=DistanceMatrix(df, 'matrix.p')
 
@@ -324,19 +340,106 @@ if False:
 
     dm.show(df, trees)
 else:
-    clusters = dm.greed(10)
-    clusters2 = deepcopy(clusters)
-  
-    for i, c in enumerate(clusters):
-        print(len(c), dm.meanDistInSingleGroup(c, i))
-    print("         overall", dm.meanDistForAllGroups(clusters))
+    steep_best_score=99999
+    steep_best_sol_greed = []
+    steep_scores= []
+    steep_time = []
 
-    clusters2 = dm.local_search(clusters2,dm.greedy_local_search)   
-    for i, c in enumerate(clusters2):
-        print(len(c), dm.meanDistInSingleGroup(c, i))
-    print("         overall", dm.meanDistForAllGroups(clusters2))
+    greed_best_score=99999
+    greed_best_sol_greed=[]
+    greed_scores=[]
+    greed_time=[]
+    for _ in range(100):
+        clusters = dm.greed(20)
 
-    clusters = dm.local_search(clusters,dm.steep_local_search)   
-    for i, c in enumerate(clusters):
-        print(len(c), dm.meanDistInSingleGroup(c, i))
-    print("         overall", dm.meanDistForAllGroups(clusters))
+        #steepest
+        clusters1 = deepcopy(clusters)
+        start = time.time()
+        clusters1 = dm.local_search(clusters,dm.steep_local_search)
+        end = time.time()
+        score = dm.meanDistForAllGroups(clusters1)
+        steep_scores.append(score)
+        steep_time.append(end-start)
+        if score<steep_best_score:
+            steep_best_score=score
+            steep_best_sol_greed=clusters1
+
+        #greedy
+        clusters2 = deepcopy(clusters)
+        start = time.time()
+        clusters2 = dm.local_search(clusters2,dm.greedy_local_search)
+        end = time.time()
+        score = dm.meanDistForAllGroups(clusters2)
+        greed_scores.append(score)
+        greed_time.append(end-start)
+        if score<greed_best_score:
+            greed_best_score=score
+            greed_best_sol_greed=clusters2
+    
+    print("steepest greed")
+    print("mean score: {}   min score: {}   max score: {}".format(\
+        np.mean(steep_scores), min(steep_scores), max(steep_scores)))
+    print("mean time: {}   min time: {}   max time: {}".format(\
+        np.mean(steep_time), min(steep_time), max(steep_time)))
+
+    print("greedy greed")
+    print("mean score: {}   min score: {}   max score: {}".format(\
+        np.mean(greed_scores), min(greed_scores), max(greed_scores)))
+    print("mean time: {}   min time: {}   max time: {}".format(\
+        np.mean(greed_time), min(greed_time), max(greed_time)))
+
+
+#random initializer
+    steep_best_score=99999
+    steep_best_sol_random = []
+    steep_scores= []
+    steep_time = []
+
+    greed_best_score=99999
+    greed_best_sol_random=[]
+    greed_scores=[]
+    greed_time=[]
+    for _ in range(100):
+        clusters = dm.greed(20)
+
+        #steepest
+        clusters1 = deepcopy(clusters)
+        start = time.time()
+        clusters1 = dm.local_search(clusters,dm.steep_local_search)
+        end = time.time()
+        score = dm.meanDistForAllGroups(clusters1)
+        steep_scores.append(score)
+        steep_time.append(end-start)
+        if score<steep_best_score:
+            steep_best_score=score
+            steep_best_sol_random=clusters1
+
+        #greedy
+        clusters2 = deepcopy(clusters)
+        start = time.time()
+        clusters2 = dm.local_search(clusters2,dm.greedy_local_search)
+        end = time.time()
+        score = dm.meanDistForAllGroups(clusters2)
+        greed_scores.append(score)
+        greed_time.append(end-start)
+        if score<greed_best_score:
+            greed_best_score=score
+            greed_best_sol_random=clusters2
+    
+    print("steepest random")
+    print("mean score: {}   min score: {}   max score: {}".format(\
+        np.mean(steep_scores), min(steep_scores), max(steep_scores)))
+    print("mean time: {}   min time: {}   max time: {}".format(\
+        np.mean(steep_time), min(steep_time), max(steep_time)))
+
+    print("greedy random")
+    print("mean score: {}   min score: {}   max score: {}".format(\
+        np.mean(greed_scores), min(greed_scores), max(greed_scores)))
+    print("mean time: {}   min time: {}   max time: {}".format(\
+        np.mean(greed_time), min(greed_time), max(greed_time)))
+
+
+    dm.showClusters(df, steep_best_sol_greed)
+    dm.showClusters(df, greed_best_sol_greed)
+    dm.showClusters(df, steep_best_sol_random)
+    dm.showClusters(df, greed_best_sol_random)
