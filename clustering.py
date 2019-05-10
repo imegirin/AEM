@@ -333,16 +333,16 @@ class Clustering:
         clusters = [np.where(arr)[0] for arr in self.point_group_vector]
         return clusters
 
-# t = []
-# for i in range(5):
-#     alg = Clustering(20)
-#     clusters = alg.initialize_clusters('greed')
-#     start = time.time()
-#     alg.local_search(clusters, alg.steep_local_search)
-#     end = time.time()
-#     t.append(end-start)
-# print(np.mean(t))
-# print(alg.mean_distance())
+t = []
+for i in range(5):
+    alg = Clustering(20)
+    clusters = alg.initialize_clusters('greed')
+    start = time.time()
+    alg.local_search(clusters, alg.steep_local_search)
+    end = time.time()
+    t.append(end-start)
+print(np.mean(t))
+print(alg.mean_distance())
 
 def run():
     if False:
@@ -572,4 +572,4 @@ def test_cache_candidates(n):
     print("mean time: {}   min time: {}   max time: {}".format(\
         np.mean(m4_time), min(m4_time), max(m4_time)))
 
-test_cache_candidates(2)
+#test_cache_candidates(2)
