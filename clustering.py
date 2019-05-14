@@ -5,6 +5,11 @@ from itertools import product
 from copy import deepcopy
 import seaborn as sns
 from random import shuffle
+import random
+from copy import deepcopy
+from math import log, e
+import numpy as np
+import threading
 import pickle
 import time
 import math
@@ -52,14 +57,16 @@ class DistanceMatrix:
         return min(tmpdict.items(), key=lambda x: x[1])
 
 class Clustering:
-
     def __init__(self, num_groups=10, filename='objects20_06.data', k=30):   
         self.df = pd.read_csv(filename, sep=' ', names=['x','y'], index_col=False)
         self.dm = DistanceMatrix(self.df, "matrix.p", recalculate=False)
-        self.scorePerCluster = {}
         self.point_group_vector = np.full((num_groups, self.df.shape[0]), False)
         self.candidates = self.get_candidates(k)
         self.cache = {}
+
+    def empty_point_group_vector(self):
+        self.point_group_vector = np.full(self.point_group_vector.shape, False)
+        self.cache= {}
 
     def MST(self, nodes):
         tree=[]
@@ -98,7 +105,7 @@ class Clustering:
         dist = self.dm.distance_point_group(node, group)
         return dist
 
-    def show(data, trees):
+    def show(self, data, trees):
         for tree, i in zip(trees,range(len(trees))):
             for point in tree:
                 plt.plot([data.iloc[point[0]].x, data.iloc[point[1]].x],
@@ -107,7 +114,7 @@ class Clustering:
         plt.scatter(data['x'], data['y'])
         plt.show()
     
-    def showClusters(data, clusters):
+    def showClusters(self, data, clusters):
         for i, cluster in enumerate(clusters):
             plt.scatter(data.loc[cluster].x, data.loc[cluster].y, \
                 c=np.hstack(np.random.rand(3,1)))
@@ -151,7 +158,7 @@ class Clustering:
 
         def regret(n):
             freeset=[i for i in range(len(self.dm.matrix))]
-            random.shuffle(freeset)
+            shuffle(freeset)
             clusters=[[freeset.pop()] for _ in range(n)]
 
             counter=0
@@ -188,7 +195,7 @@ class Clustering:
 
         def regret2(n):
             freeset=[i for i in range(len(self.dm.matrix))]
-            random.shuffle(freeset)
+            shuffle(freeset)
             clusters=[[freeset.pop()] for _ in range(n)]
 
             while freeset!=[]:
@@ -231,7 +238,7 @@ class Clustering:
 
         def random(n):
             freeset = [i for i in range(len(self.dm.matrix))]
-            random.shuffle(freeset)
+            shuffle(freeset)
             clusters = [[] for _ in range(n)]
             c = 0
             while freeset!=[]:
@@ -267,6 +274,66 @@ class Clustering:
     def get_candidate_groups(self, node):
         nearest_neighbors = self.candidates[node]
         return set([np.where(self.point_group_vector[:,element]==True)[0][0] for element in nearest_neighbors])
+
+    def get_candidate_groups_list(self,node):
+        nearest_neighbors = self.candidates[node]
+        return list([np.where(self.point_group_vector[:,element]==True)[0][0] for element in nearest_neighbors])
+
+    def entropy(self, labels, base=None):
+        n_labels = len(labels)
+        if n_labels <= 1:
+            return 0
+        _,counts = np.unique(labels, return_counts=True)
+        probs = counts / n_labels
+        n_classes = np.count_nonzero(probs)
+        if n_classes <= 1:
+            return 0
+
+        ent = 0.
+        base = e if base is None else base
+        for i in probs:
+            ent -= i * log(i, base)
+
+        return ent
+
+    def get_entropy_list(self):
+        return [self.entropy(self.get_candidate_groups_list(i)) for i in range(len(self.dm.matrix))]
+
+    def destroy(self, clusters, p):
+        new_clusters = list(map(list, clusters))
+        n = int(np.round(np.sum(self.point_group_vector)*p))
+        freeset = []
+        entropy_list = list(np.argsort(self.get_entropy_list()))
+
+        for _ in range(n):
+            item = entropy_list.pop()
+            for i, c in enumerate(new_clusters):
+                if item in c:
+                    c.remove(item)
+                    freeset.append(item)
+
+        return new_clusters, freeset
+
+    def repair(self, n, clusters, freeset):
+        clusters = list(map(list, clusters))
+        shuffle(freeset)
+
+        counter=np.random.randint(n)
+        while freeset!=[]:
+            _, (_,neighbor) = self.dm.findNearestNode(clusters[counter%n], freeset)
+            neighbor = int(neighbor)
+            alt = []
+            for cluster in clusters:
+                t = [self.dm.getDist(neighbor, node)[0] for node in cluster]
+                element = min(t) if t!=[] else 0.
+                alt.append(element)
+
+            idx = alt.index(min(alt))
+            clusters[idx].append(neighbor)
+            freeset.remove(neighbor)
+            counter+=1
+        
+        return clusters
 
     def steep_local_search(self, candidates=True, caching=True):
         point_space = list(range(len(self.dm.matrix)))
@@ -333,16 +400,84 @@ class Clustering:
         clusters = [np.where(arr)[0] for arr in self.point_group_vector]
         return clusters
 
-t = []
-for i in range(5):
-    alg = Clustering(20)
-    clusters = alg.initialize_clusters('greed')
-    start = time.time()
-    alg.local_search(clusters, alg.steep_local_search)
-    end = time.time()
-    t.append(end-start)
-print(np.mean(t))
-print(alg.mean_distance())
+    def perturbation(self, clusters, n):
+        for i in np.random.randint(len(clusters), size=n):
+            clusters = list(map(list, clusters))
+            if len(clusters[i]):
+                v = clusters[i].pop(np.random.randint(len(clusters[i])))
+                clusters[np.random.choice([j for j in range(len(clusters)) if j!=i])].append(v)
+        return clusters
+
+    def iterative_local_search(self, clusters, run_time, perturb_size=8):
+        start = time.time()
+        while time.time()-start<run_time:
+            another_solution = deepcopy(self)
+            another_solution.point_group_vector = self.point_group_vector.copy()
+            another_solution.empty_point_group_vector()
+            perturbated = self.perturbation(clusters, perturb_size)
+            for i, c in enumerate(perturbated):
+                another_solution.point_group_vector[i][c]=True
+
+            another_clusters = another_solution.local_search(perturbated, another_solution.steep_local_search, candidates=True)
+            if self.mean_distance()>another_solution.mean_distance():
+                self.point_group_vector = another_solution.point_group_vector
+                clusters = another_clusters
+
+        return clusters
+
+    def large_neighborhood_local_search(self, clusters, run_time, p=.3):
+        start = time.time()
+        while time.time()-start<run_time:
+            another_solution = deepcopy(self)
+            another_solution.point_group_vector = self.point_group_vector.copy()
+            another_solution.empty_point_group_vector()
+            
+            new_clusters, freeset = self.destroy(clusters, p)
+            new_clusters = self.repair(len(self.point_group_vector), new_clusters, freeset)
+            for i, c in enumerate(new_clusters):
+                another_solution.point_group_vector[i][c]=True
+
+            another_clusters = another_solution.local_search(new_clusters, another_solution.steep_local_search, candidates=True)
+            if self.mean_distance()>another_solution.mean_distance():
+                self.point_group_vector = another_solution.point_group_vector
+                clusters = another_clusters
+        return clusters
+
+def multiple_start_local_search(n=100):
+    times = []
+    scores = []
+    #best_solution = None
+    for _ in range(n):
+        clustering = Clustering(20)
+        clusters = clustering.initialize_clusters('random')
+        start = time.time()
+        clusters = clustering.local_search(clusters, clustering.steep_local_search, \
+            candidates=True, caching=False)
+        end = time.time()
+        md = clustering.mean_distance()
+        scores.append(md)
+        times.append(end-start)
+        print('time is',end-start)
+        # if md<=np.min(scores):
+        #     best_solution = clusters
+    # self.empty_point_group_vector()
+    # for i, c in enumerate(best_solution):
+    #     self.point_group_vector[i][c]=True
+    
+    return np.min(scores)
+
+
+# t = []
+# for i in range(1):
+#     alg = Clustering(20)
+#     clusters = alg.initialize_clusters('random')
+#     print(alg.mean_distance())
+#     start = time.time()
+#     alg.multiple_start_local_search(2)
+#     end = time.time()
+#     t.append(end-start)
+# print(np.mean(t))
+# print(alg.mean_distance())
 
 def run():
     if False:
@@ -392,7 +527,6 @@ def run():
             if score<steep_best_score:
                 steep_best_score=score
                 steep_best_sol_greed=clusters1
-            dm.scorePerCluster={}
 
             dm=DistanceMatrix(df, 'matrix.p')
 
@@ -407,7 +541,6 @@ def run():
             if score<greed_best_score:
                 greed_best_score=score
                 greed_best_sol_greed=clusters2
-            dm.scorePerCluster={}
         
         print("steepest greed")
         print("mean score: {}   min score: {}   max score: {}".format(\
@@ -572,4 +705,73 @@ def test_cache_candidates(n):
     print("mean time: {}   min time: {}   max time: {}".format(\
         np.mean(m4_time), min(m4_time), max(m4_time)))
 
-#test_cache_candidates(2)
+def test_alternative_local_search(n):
+    m1_time=[]
+    m1_score=[]
+    m2_time=[]
+    m2_score=[]
+    m3_time=[]
+    m3_score=[]
+
+    def test_msls(n, iterations=2):
+        for i in range(iterations):
+            print(i)
+            #clustering = Clustering(20)
+            start = time.time()
+            md = multiple_start_local_search(n)
+            end = time.time()
+            m1_score.append(md)
+            m1_time.append(end-start)
+
+    def test_ils(run_time, iterations=2):
+        for i in range(iterations):
+            print(i)
+            clustering = Clustering(20)
+            clusters = clustering.initialize_clusters('random')
+            start = time.time()
+            clusters = clustering.iterative_local_search(clusters, run_time, 8)
+            end = time.time()
+            md = clustering.mean_distance()
+            m2_score.append(md)
+            m2_time.append(end-start)
+
+    def test_lnls(run_time,iterations=2):
+        for i in range(iterations):
+            print(i)
+            clustering = Clustering(20)
+            clusters = clustering.initialize_clusters('random')
+            start = time.time()
+            clusters = clustering.large_neighborhood_local_search(clusters, run_time, p=.3)
+            end = time.time()
+            md = clustering.mean_distance()
+            m3_score.append(md)
+            m3_time.append(end-start)
+
+    iterations = 10
+    test_msls(100, iterations)
+    print('finished msls')
+    run_time = np.mean(m1_time)
+    t1 = threading.Thread(target=test_ils, args=(run_time, iterations))
+    t2 = threading.Thread(target=test_lnls, args=(run_time, iterations))
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+    print("mean score: {}   min score: {}   max score: {}".format(\
+        np.mean(m1_score), min(m1_score), max(m1_score)))
+    print("mean time: {}   min time: {}   max time: {}".format(\
+        np.mean(m1_time), min(m1_time), max(m1_time)))
+    print()
+    print("mean score: {}   min score: {}   max score: {}".format(\
+        np.mean(m2_score), min(m2_score), max(m2_score)))
+    print("mean time: {}   min time: {}   max time: {}".format(\
+        np.mean(m2_time), min(m2_time), max(m2_time)))
+    print()
+    print("mean score: {}   min score: {}   max score: {}".format(\
+        np.mean(m3_score), min(m3_score), max(m3_score)))
+    print("mean time: {}   min time: {}   max time: {}".format(\
+        np.mean(m3_time), min(m3_time), max(m3_time)))
+
+#test_cache_candidates(1)
+test_alternative_local_search(2)
