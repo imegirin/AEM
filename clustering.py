@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from itertools import product
+import itertools
 from copy import deepcopy
 import seaborn as sns
 from random import shuffle
@@ -335,7 +336,7 @@ class Clustering:
         
         return clusters
 
-    def steep_local_search(self, candidates=True, caching=True):
+    def steep_local_search(self, candidates=True, caching=False):
         point_space = list(range(len(self.dm.matrix)))
         shuffle(point_space)
 
@@ -370,7 +371,7 @@ class Clustering:
             self.cache={}
             return 200
 
-    def greedy_local_search(self, candidates=True):
+    def greedy_local_search(self, candidates=True, caching=False):
         point_space = list(range(len(self.dm.matrix)))
         shuffle(point_space)
         for i in point_space:
@@ -466,18 +467,22 @@ def multiple_start_local_search(n=100):
     
     return np.min(scores)
 
+def get_unordered_pair(v1, v2):
+    return (v1,v2) if v1<v2 else (v2,v1)
 
-# t = []
-# for i in range(1):
-#     alg = Clustering(20)
-#     clusters = alg.initialize_clusters('random')
-#     print(alg.mean_distance())
-#     start = time.time()
-#     alg.multiple_start_local_search(2)
-#     end = time.time()
-#     t.append(end-start)
-# print(np.mean(t))
-# print(alg.mean_distance())
+def get_pairs_in_group(group):
+    return [get_unordered_pair(v1, v2) for v1, v2 in list(itertools.combinations(group, 2))]
+
+def solution_similarity(sol1, sol2):
+    pairs_sol1 = set()
+    for g in sol1:
+        pairs_sol1 |= set(get_pairs_in_group(g))
+
+    pairs_sol2 = set()
+    for g in sol2:
+        pairs_sol2 |= set(get_pairs_in_group(g))
+
+    return len(pairs_sol1 & pairs_sol2)
 
 def run():
     if False:
@@ -773,5 +778,41 @@ def test_alternative_local_search(n):
     print("mean time: {}   min time: {}   max time: {}".format(\
         np.mean(m3_time), min(m3_time), max(m3_time)))
 
+def similarity(n):
+    solutions = []
+    scores = []
+    for _ in range(n):
+        clustering = Clustering(20)
+        clusters = clustering.initialize_clusters('greed')
+        clusters = clustering.local_search(clusters, clustering.greedy_local_search, \
+            candidates=True, caching=False)
+
+        scores.append(clustering.mean_distance())
+        solutions.append(clusters)
+
+    best_solution = solutions[np.argmin(scores)]
+    print(np.sum([len(g) for g in best_solution]))
+    print(np.max(scores))
+
+    similarities = [np.mean([solution_similarity(sol1, sol2) for sol1 in solutions]) for sol2 in solutions]
+
+    plt.scatter(similarities, scores)
+    plt.ylabel("Score")
+    plt.xlabel("Average similarity to others")
+    plt.title("Average similarities to other solutions")
+    print("To others:", np.corrcoef(similarities, scores))
+    plt.show()
+
+    similarities = [solution_similarity(sol, best_solution) for sol in solutions]
+
+    plt.scatter(similarities, scores)
+    plt.ylabel("Score")
+    plt.xlabel("Similarity to best solution")
+    plt.title("Similarity to the best solution")
+    print("To the best:", np.corrcoef(similarities, scores))
+    plt.show()
+
+
 #test_cache_candidates(1)
-test_alternative_local_search(2)
+#test_alternative_local_search(2)
+similarity(500)
