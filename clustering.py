@@ -9,6 +9,8 @@ from random import shuffle
 import random
 from copy import deepcopy
 from math import log, e
+import networkx 
+from networkx.algorithms.components.connected import connected_components
 import numpy as np
 import threading
 import pickle
@@ -444,6 +446,91 @@ class Clustering:
                 clusters = another_clusters
         return clusters
 
+    def get_pairs_in_group(self,group):
+        return [get_unordered_pair(v1, v2) for v1, v2 in list(itertools.combinations(group, 2))]
+
+    def common_part(self, sol1, sol2):
+        pairs_sol1 = set()
+        for g in sol1:
+            pairs_sol1 |= set(self.get_pairs_in_group(g))
+
+        pairs_sol2 = set()
+        for g in sol2:
+            pairs_sol2 |= set(self.get_pairs_in_group(g))
+
+        return pairs_sol1 & pairs_sol2
+
+    def generate_groups_from_pairs(self, pairs, n_groups):
+        sorted_pairs = sorted(pairs)
+        clusters = [[] for _ in range(n_groups)]
+        used_nodes = set()
+
+        l = pairs
+        taken=[False]*len(l)
+        l=[set(elem) for elem in l]
+
+        def dfs(node,index):
+            taken[index]=True
+            ret=node
+            for i,item in enumerate(l):
+                if not taken[i] and not ret.isdisjoint(item):
+                    ret.update(dfs(item,i))
+            return ret
+
+        def merge_all():
+            ret=[]
+            for i,node in enumerate(l):
+                if not taken[i]:
+                    ret.append(list(dfs(node,i)))
+            return ret
+
+        preclusters = merge_all()
+
+        for c in preclusters:
+            clusters[np.argmin([len(g) for g in clusters])].extend(c)
+        
+        for c in clusters:
+            used_nodes |= set(c)
+
+        return clusters, list(used_nodes)
+
+    def evolution(self, run_time, no_of_competitors=15, n=20):
+        def simple_solution(n=20):
+            clustering = Clustering(20)
+            clusters = clustering.initialize_clusters('greed')
+            clusters = clustering.local_search(clusters, clustering.steep_local_search,\
+                candidates=True, caching=False)
+            return clusters, clustering.mean_distance()
+
+        def crossings(sol1, sol2):
+            solution, used_nodes = self.generate_groups_from_pairs(self.common_part(sol1, sol2), n)
+            leftovers = list(set(range(len(self.dm.matrix))) - set(used_nodes))
+            while leftovers!=[]:
+                solution[random.randint(0, len(solution)-1)].append(leftovers.pop())
+            
+            return solution
+
+
+        population = [simple_solution() for _ in range(no_of_competitors)]
+        start = time.time()
+        iterations = 0
+        while time.time()-start<run_time:
+            s1, s2 = np.random.choice(range(no_of_competitors), 2, replace=False)
+            solution = crossings(population[s1][0], population[s2][0])
+            clustering = Clustering(n)
+            clustering.empty_point_group_vector()
+            for i, c in enumerate(solution):
+                clustering.point_group_vector[i][c]=True
+            clusters = clustering.local_search(solution, clustering.steep_local_search, \
+                candidates=True, caching=False)
+            score = clustering.mean_distance()
+            if score < np.max([res[1] for res in population]) and all([score!=p[1] for p in population]):
+                del population[np.argmax([res[1] for res in population])]
+                population.append((clusters, score))
+            iterations += 1
+        
+        return population[np.argmin([res[1] for res in population])], iterations, time.time()-start
+
 def multiple_start_local_search(n=100):
     times = []
     scores = []
@@ -815,4 +902,27 @@ def similarity(n):
 
 #test_cache_candidates(1)
 #test_alternative_local_search(2)
-similarity(500)
+#similarity(500)
+
+scores=[]
+times=[]
+iterations=[]
+for _ in range(10):
+    print(".", end="")
+    (res, score), i, t = Clustering(20).evolution(2500,15)
+    scores.append(score)
+    times.append(t)
+    iterations.append(i)
+
+print("scores")
+print(np.min(score))
+print(np.mean(score))
+print(np.max(score))
+print("times")
+print(np.min(times))
+print(np.mean(times))
+print(np.max(times))
+print("iterations")
+print(np.min(iterations))
+print(np.mean(iterations))
+print(np.max(iterations))
